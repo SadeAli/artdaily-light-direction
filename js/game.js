@@ -753,9 +753,42 @@
     ctx.restore();
   }
 
+  /* WHAT THE CANVAS SAYS IT IS. "Light Direction drill area" is true and
+     useless: this canvas is a fully keyboard-operable control — arrows
+     aim, Enter locks — and its label never mentioned the two numbers the
+     player is actually setting, so the whole non-visual channel was four
+     words. It now carries the form, the aim currently dialled in, and the
+     key that ends it. Rewritten only when the string changes, so a mouse
+     drag does not rewrite the accessible name once a frame. */
+  var lastLabel = '';
+  function syncCanvasLabel() {
+    var s, it;
+    if (phase === 'idle' || !items.length) {
+      s = 'Light Direction drill area';
+    } else if (phase === 'done') {
+      s = 'Light Direction — round over. Press “new round” to go again.';
+    } else if (phase === 'reveal') {
+      it = items[idx];
+      s = 'Light Direction, form ' + (idx + 1) + ' of ' + ITEMS_PER_ROUND +
+        ' — off by ' + Math.round(lastErr) + ' degrees. The real light was direction ' +
+        Math.round(it.az) + ' degrees, tilt ' + Math.round(it.el) +
+        ' degrees; you said direction ' + Math.round(guess.az) + ', tilt ' +
+        Math.round(guess.el) + '. Press Enter for the next form.';
+    } else {
+      s = 'Light Direction, form ' + (idx + 1) + ' of ' + ITEMS_PER_ROUND +
+        ' — your sun: direction ' + Math.round(guess.az) + ' degrees, tilt ' +
+        Math.round(guess.el) + ' degrees' + (touched ? '' : ', not placed yet') +
+        '. Arrow keys aim, hold shift for coarse steps, Enter locks it in.';
+    }
+    if (s === lastLabel) return;
+    lastLabel = s;
+    canvas.setAttribute('aria-label', s);
+  }
+
   function draw() {
     var c = inks();
     ctx.clearRect(0, 0, W, H);
+    syncCanvasLabel();
     if (phase === 'idle' || !items.length) return;
     var it = items[idx];
     var reveal = (phase === 'reveal' || phase === 'done');
@@ -823,6 +856,14 @@
     }, 4500);
   }
 
+  /* The hint is a live region now, and these two lines are written on
+     every stray press — identical text, over and over. Writing it only
+     when it actually changes keeps a screen reader from re-reading the
+     same sentence at every miss (and saves the DOM churn). */
+  function setHint(t) {
+    if (hint.textContent !== t) hint.textContent = t;
+  }
+
   function setAimHint() {
     hint.textContent = 'form ' + (idx + 1) + ' of ' + ITEMS_PER_ROUND +
       ' — read the shading: where is the light? drag the sun round the ring for its direction,' +
@@ -859,6 +900,25 @@
     return q;
   }
 
+  /* REDUCED MOTION MEANS "STOP MOVING THE PAGE UNDER ME" — and the reveal
+     is exactly that: your light beside the true light, the shadow edge
+     drawn and named, replaced by the next form on a timer whether or not
+     you were done with it. A player who has asked the OS for reduced
+     motion (and anyone reading the hint through a screen reader, where a
+     polite announcement can still be mid-sentence at seven seconds) gets
+     the lesson taken away mid-read. So the timer is simply not armed for
+     them; the reveal waits for “next”. Nothing else moves — the button,
+     the tap and Enter all advance exactly as before. */
+  function autoAdvances() {
+    /* round 1's first forms already wait for an explicit press */
+    if (round === 1 && idx < REVEAL_HOLD_ITEMS) return false;
+    try {
+      if (window.matchMedia &&
+          window.matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
+    } catch (e) {}
+    return true;
+  }
+
   function lockIn() {
     if (phase !== 'aim') return;
     clearConfirm();
@@ -869,18 +929,17 @@
     phase = 'reveal';
     revealAt = Date.now();
     setBtn(idx === ITEMS_PER_ROUND - 1 ? 'finish' : 'next', '→');
+    var auto = autoAdvances();
     hint.textContent = 'off by ' + Math.round(lastErr) + '° — ' + quip(lastErr, lastAzErr) +
-      (round === 1 && idx < REVEAL_HOLD_ITEMS
-        ? ' compare the two small forms — yours and the true one — then press “next”.'
-        : '');
+      (auto
+        ? ''
+        : ' compare the two small forms — yours and the true one — then press “next”.');
     clearTimeout(revealTimer);
-    /* Round 1's first forms wait for the player; after that the reveal
-       still auto-advances, but at 7s rather than 4 — long enough to put
-       your light and the true light side by side and actually compare
-       them, which is the entire lesson. */
-    if (!(round === 1 && idx < REVEAL_HOLD_ITEMS)) {
-      revealTimer = setTimeout(advance, REVEAL_MS);
-    }
+    /* Round 1's first forms wait for the player, and so does anyone who
+       asked for reduced motion; otherwise the reveal auto-advances, but at
+       7s rather than 4 — long enough to put your light and the true light
+       side by side and actually compare them, which is the entire lesson. */
+    if (auto) revealTimer = setTimeout(advance, REVEAL_MS);
     draw();
   }
 
@@ -1024,10 +1083,10 @@
       var now = Date.now();
       if (now - lastFormTap < DBLTAP_MS) { lastFormTap = 0; lockIn(); return; }
       lastFormTap = now;
-      hint.textContent = 'double-tap the form to lock it in — or drag the sun round the ring for direction, along the corner arc for tilt.';
+      setHint('double-tap the form to lock it in — or drag the sun round the ring for direction, along the corner arc for tilt.');
       return;
     } else {
-      hint.textContent = 'drag the sun round the dashed ring for direction, along the corner arc for tilt — then lock it in.';
+      setHint('drag the sun round the dashed ring for direction, along the corner arc for tilt — then lock it in.');
       return;
     }
     dragId = ev.pointerId;
