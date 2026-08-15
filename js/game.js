@@ -1009,8 +1009,16 @@
     var k = ev.key;
     if (k === 'Enter' || k === ' ') {
       ev.preventDefault();
+      /* A HELD Enter auto-repeats, and this chain has no terminal state
+         ('done' starts a fresh round), so it used to run lock → next →
+         lock → … → report → new round for as long as the key was down:
+         a couple of garbage rounds a second, every one of them posted to
+         the record. Only the first press is a press — and the reveal
+         keeps the same SKIP_LOCK_MS hold the pointer path has, so a
+         keypress cannot skip a reveal the instant it appears either. */
+      if (ev.repeat) return;
       if (phase === 'aim') lockIn();
-      else if (phase === 'reveal') advance();
+      else if (phase === 'reveal') { if (Date.now() - revealAt >= SKIP_LOCK_MS) advance(); }
       else if (phase === 'done') newRound();
       return;
     }
@@ -1029,9 +1037,13 @@
   });
 
   /* ---- chrome wiring ---- */
+  /* The button changes job in place (lock it in ☀ → next →), so the
+     second click of a double-click lands on the reveal the first click
+     just earned — the very thing SKIP_LOCK_MS exists to stop. Same hold
+     as the canvas path. */
   btnDone.addEventListener('click', function () {
     if (phase === 'aim') lockIn();
-    else if (phase === 'reveal') advance();
+    else if (phase === 'reveal' && Date.now() - revealAt >= SKIP_LOCK_MS) advance();
   });
   btnRound.addEventListener('click', requestNewRound);
 
