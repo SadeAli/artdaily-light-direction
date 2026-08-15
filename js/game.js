@@ -245,7 +245,9 @@
   }
 
   /* ---- layout: form + azimuth ring on the left, elevation arc
-     bottom-right. Every touch band is ≥ 44px wide. ---- */
+     bottom-right. Band widths are set at the input handler, through
+     ArtDaily.startRadius() — ≥ 68px wide on a trackpad and ≥ 108px on a
+     pen, which is the one that cannot see its own cursor. ---- */
   var lay = null;
   function layout() {
     var formR = Math.round(Math.min(W, H) * 0.16);
@@ -916,11 +918,54 @@
   }
 
   /* ============================================================
-     input — drag the ring (azimuth) or the arc (elevation);
-     both bands are ≥ 68px wide. Double-tap the form to lock without
-     leaving the canvas. Tap during reveal to skip — but not in the
-     first moment, so a stray second tap can't eat the answer.
+     input — drag the ring (azimuth) or the arc (elevation).
+     Double-tap the form to lock without leaving the canvas. Tap during
+     reveal to skip — but not in the first moment, so a stray second tap
+     can't eat the answer.
+
+     HIT ZONES ARE SIZED FOR THE HAND HOLDING THE POINTER.
+     They used to be two fixed numbers, 34px either side of the ring and
+     44px either side of the arc. That is generous for a finger and mean
+     for a screenless tablet, where the hand is out of sight and simply
+     ACQUIRING a target is the hardest thing the instrument does —
+     which is the whole reason ArtDaily.startRadius() exists (pen ×1.7,
+     finger ×1.6, mouse/trackpad ×1).
+     Widening PRIORITISED bands would have broken the drill instead of
+     helping it: at ×1.7 the ring's band reaches 58px inward, on a phone
+     that is radius 38 against a form that ends at 58, and the form was
+     tested LAST — the double-tap lock gesture would have died silently
+     on exactly the hardware the change was meant to help. So the test
+     resolves by NEAREST TARGET rather than by priority: every target
+     reports how far the press missed it, and the smallest miss inside
+     its own band wins. That is what a widened zone should mean, and it
+     stays correct however far the bands are allowed to overlap.
      ============================================================ */
+
+  var FORM_FEATHER = 8;   /* px of slack around the form's own edge   */
+  var RING_BAND = 34;     /* mouse-reference half-widths; startRadius */
+  var ARC_BAND = 44;      /* opens them up for a pen or a finger      */
+  var ARC_QUAD = 24;      /* how far past the corner the arc still reads */
+
+  /* pure: a point + the current layout + two band widths → which control
+     the press belongs to ('form' | 'az' | 'el'), or null for none. */
+  function pickTarget(p, L, ringBand, arcBand) {
+    var dCentre = Math.hypot(p.x - L.cx, p.y - L.cy);
+    var dArcC = Math.hypot(p.x - L.arcC.x, p.y - L.arcC.y);
+    var best = null, bestMiss = Infinity;
+    function offer(id, ok, miss) {
+      if (!ok || !isFinite(miss) || !(miss < bestMiss)) return;
+      bestMiss = miss;
+      best = id;
+    }
+    /* the form is a disc: inside it the miss is zero, so a press anywhere
+       on the form beats a ring band that has been widened over it */
+    offer('form', dCentre <= L.formR + FORM_FEATHER, Math.max(0, dCentre - L.formR));
+    offer('az', Math.abs(dCentre - L.ringR) <= ringBand, Math.abs(dCentre - L.ringR));
+    offer('el', Math.abs(dArcC - L.ar) <= arcBand &&
+      p.x <= L.arcC.x + ARC_QUAD && p.y <= L.arcC.y + ARC_QUAD,
+      Math.abs(dArcC - L.ar));
+    return best;
+  }
 
   function pointerPos(ev) {
     var rect = canvas.getBoundingClientRect();
@@ -964,16 +1009,17 @@
        snatch the sun mid-drag. */
     if (dragId !== null) return;
     var p = pointerPos(ev);
-    var dRing = Math.abs(Math.hypot(p.x - lay.cx, p.y - lay.cy) - lay.ringR);
-    var dArc = Math.hypot(p.x - lay.arcC.x, p.y - lay.arcC.y);
-    var dForm = Math.hypot(p.x - lay.cx, p.y - lay.cy);
-    if (dRing <= 34) {
+    /* re-read every press: the profile can change mid-session (a laptop
+       player plugs in a tablet) and these must move with it */
+    var target = pickTarget(p, lay, ArtDaily.startRadius(RING_BAND),
+      ArtDaily.startRadius(ARC_BAND));
+    if (target === 'az') {
       drag = 'az';
       applyAz(p);
-    } else if (dArc >= lay.ar - 44 && dArc <= lay.ar + 44 && p.x <= lay.arcC.x + 24 && p.y <= lay.arcC.y + 24) {
+    } else if (target === 'el') {
       drag = 'el';
       applyEl(p);
-    } else if (dForm <= lay.formR + 8) {
+    } else if (target === 'form') {
       /* the form itself: a lock gesture on touch, and never a silent tap */
       var now = Date.now();
       if (now - lastFormTap < DBLTAP_MS) { lastFormTap = 0; lockIn(); return; }

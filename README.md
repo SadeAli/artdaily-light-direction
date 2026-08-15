@@ -37,6 +37,15 @@ for an explicit "next" on the first two forms of a first round and holds
 now read "from the side" / "from behind you".
 
 ## Input fairness
+Hit zones go through `ArtDaily.startRadius()`: the azimuth ring reads ±34px
+on a trackpad, ±54 on a finger and ±58 on a pen, the elevation arc ±44/±70/±75.
+Widening them meant the ring's band can now overlap the form's double-tap
+zone, so the hit test resolves by NEAREST target rather than by priority —
+every control reports how far the press missed it and the smallest miss
+inside its own band wins. (Under the old priority order a pen's widened ring
+would have swallowed the form and killed the lock gesture outright.)
+Scoring is untouched: `GRACE_DEG = 3`, `ZERO_SPAN = 42` on every device.
+
 
 Scores are only ever compared against your own history, so the drill
 eases its tolerances for the hardware in your hand and says which one it
