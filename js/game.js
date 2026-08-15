@@ -6,6 +6,12 @@
    vectors. Six forms per round; contrast falls and elevations go
    extreme as the round ramps. Skeleton: init → item → lock →
    reveal → … → ArtDaily.report once per round.
+
+   Everything the player reads is real 3D: per-pixel surface
+   normals shaded by a real light vector, and a cast shadow that
+   is the form's silhouette actually projected along that vector
+   onto the ground plane under a pitched camera — so the shadow
+   can never contradict the shading it sits under.
    ============================================================ */
 (function () {
   'use strict';
@@ -14,19 +20,24 @@
   var ITEMS_PER_ROUND = 6;
   var GRACE_DEG = 3;    /* errors under this still score 100 */
   var ZERO_SPAN = 42;   /* score hits 0 at grace + this = 45° off */
-  var REVEAL_MS = 2600; /* reveal auto-advances (tap skips) */
+  var REVEAL_MS = 4000; /* reveal auto-advances (tap skips) */
+  var SKIP_LOCK_MS = 450; /* …but not for the first moment, so a
+                             stray second tap can't eat the lesson */
+  var DBLTAP_MS = 380;  /* double-tap the form = lock it in */
 
   /* ============================================================
      pure scoring math — inputs in, 0–100 out, no canvas/DOM.
      ============================================================ */
+
+  var DEG = Math.PI / 180;
 
   /* azimuth: screen-plane angle around the form, 0° = light from the
      right, 90° = from the top, counterclockwise. elevation: 0° = raking
      edge light in the picture plane, 90° = frontal, straight out of the
      page. Returns a unit vector (x right, y up, z toward the viewer). */
   function lightVec(azDeg, elDeg) {
-    var az = azDeg * Math.PI / 180;
-    var el = elDeg * Math.PI / 180;
+    var az = azDeg * DEG;
+    var el = elDeg * DEG;
     return {
       x: Math.cos(el) * Math.cos(az),
       y: Math.cos(el) * Math.sin(az),
@@ -34,18 +45,30 @@
     };
   }
 
+  function dot3(a, b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+
+  function clamp01(x) { return x >= 1 ? 1 : (x > 0 ? x : 0); }
+
   function angleBetweenDeg(a, b) {
-    var d = a.x * b.x + a.y * b.y + a.z * b.z;
+    var d = dot3(a, b);
     if (d > 1) d = 1;
     if (d < -1) d = -1;
-    return Math.acos(d) * 180 / Math.PI;
+    return Math.acos(d) / DEG;
+  }
+
+  /* shortest signed turn from → to, in (-180, 180] */
+  function signedDeltaDeg(from, to) {
+    var d = (to - from) % 360;
+    if (d > 180) d -= 360;
+    if (d <= -180) d += 360;
+    return d;
   }
 
   /* 100 inside the 3° grace cone, then linear down to 0 at 45° off. */
   function itemScore(errDeg) {
     if (!isFinite(errDeg)) return 0;
     var t = 1 - Math.max(0, errDeg - GRACE_DEG) / ZERO_SPAN;
-    return 100 * Math.max(0, Math.min(1, t));
+    return 100 * clamp01(t);
   }
 
   function roundScore(itemScores) {
@@ -65,6 +88,61 @@
     return ambient + (top - ambient) * lit;
   }
 
+  /* ---- the ground, for real ------------------------------------
+     The camera is pitched down by CAM_PITCH, which is the only
+     reason a horizontal plane reads as a plane instead of a line.
+     With that one declared angle the ground gets an honest basis in
+     view coords (x right, y up, z toward the viewer), and the sun's
+     altitude over it — not its frontality — decides how the shadow
+     runs. Depth foreshortens by sin(pitch) on the way to the sheet.
+     ---------------------------------------------------------- */
+  var CAM_PITCH = 16 * DEG;
+  var SIN_P = Math.sin(CAM_PITCH);
+  var COS_P = Math.cos(CAM_PITCH);
+  var UP = { x: 0, y: COS_P, z: SIN_P };            /* world up */
+  var GZ = { x: 0, y: SIN_P, z: -COS_P };           /* ground, away from viewer */
+
+  /* sun altitude over the ground plane in degrees; ≤ 0 means the
+     light is under the floor and throws no shadow on it at all. */
+  function sunAltitudeDeg(L) {
+    var d = dot3(L, UP);
+    if (d > 1) d = 1;
+    if (d < -1) d = -1;
+    return Math.asin(d) / DEG;
+  }
+
+  /* the direction a shadow runs, in ground coords (a = screen-x,
+     b = away from the viewer): anti-light, flattened onto the floor.
+     A sun at the exact zenith flattens to nothing and has no run at
+     all — it still needs a direction to build an ellipse around, so
+     it falls back to "away from the viewer" and the pool comes out
+     round, which is what an overhead sun actually casts. */
+  function shadowDirGround(L) {
+    var v = { x: -L.x, y: -L.y, z: -L.z };
+    var d = dot3(v, UP);
+    v.x -= d * UP.x; v.y -= d * UP.y; v.z -= d * UP.z;
+    var m = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+    if (!(m > 1e-9)) return { a: 0, b: 1 };
+    v.x /= m; v.y /= m; v.z /= m;
+    return { a: v.x, b: dot3(v, GZ) };
+  }
+
+  /* A sphere of radius r whose centre floats `height` over the floor,
+     lit by a directional sun at `altDeg`: its shadow is the exact
+     ellipse you get by sweeping the silhouette down the light —
+     semi-major r/sin(alt) along the run, semi-minor r across it,
+     centre pushed height/tan(alt) away from the light. */
+  function sphereShadow(ga, gb, height, r, altDeg, dir) {
+    var a = Math.max(altDeg, 14) * DEG; /* grazing suns stay drawable */
+    var run = height / Math.tan(a);
+    return {
+      a: ga + run * dir.a,
+      b: gb + run * dir.b,
+      major: r / Math.sin(a),
+      minor: r,
+    };
+  }
+
   /* ============================================================
      drill state + chrome
      ============================================================ */
@@ -76,6 +154,7 @@
   var hudRound = document.getElementById('hudRound');
   var hudScore = document.getElementById('hudScore');
   var hudBest = document.getElementById('hudBest');
+  var btnDone = document.getElementById('btnDone');
   var btnRound = document.getElementById('btnRound');
 
   ArtDaily.init({ slug: SLUG });
@@ -172,14 +251,27 @@
     var cy = Math.min(Math.max(Math.round(H * 0.47), ringR + 14), H - ringR - 8);
     var arcC = { x: W - 28, y: H - 26 };
     var ar = Math.max(54, Math.min(120, arcC.x - (cx + ringR) - 26));
-    lay = { formR: formR, ringR: ringR, cx: cx, cy: cy, arcC: arcC, ar: ar };
+    /* the reveal's you-vs-true patches live in the strip left under
+       the ring, sized to what is actually free there — hardcoding it
+       let the dashed ring saw through them at phone widths. */
+    var free = H - 8 - 14 - (cy + ringR + 8);
+    var pr = Math.max(13, Math.min(26, Math.floor(free / (2 * 1.18))));
+    var pbox = Math.ceil(2 * pr * 1.18);
+    lay = {
+      formR: formR, ringR: ringR, cx: cx, cy: cy, arcC: arcC, ar: ar,
+      patchR: pr,
+      patchY: H - 8 - 14 - pbox / 2,
+      patchX: [10 + pbox / 2, 10 + pbox / 2 + pbox + 20],
+    };
   }
 
   /* ---- round state ---- */
-  var round = 0, idx = 0, items = [], scores = [], lastErr = 0;
+  var round = 0, idx = 0, items = [], scores = [], lastErr = 0, lastAzErr = 0;
   var phase = 'idle'; /* 'aim' | 'reveal' | 'done' */
   var guess = { az: 90, el: 40 };
-  var revealTimer = null;
+  var touched = false;       /* has the player moved their sun yet? */
+  var revealTimer = null, revealAt = 0;
+  var confirmTimer = null, confirmNew = false;
 
   function rand(lo, hi) { return lo + Math.random() * (hi - lo); }
 
@@ -191,6 +283,7 @@
       e = Math.sqrt(s[i].x * s[i].x + s[i].y * s[i].y) + s[i].r;
       if (e > m) m = e;
     }
+    if (!(m > 0)) m = 1; /* a zero-size form would divide the blob into NaN */
     for (i = 0; i < s.length; i++) {
       s[i].x /= m; s[i].y /= m; s[i].z /= m; s[i].r /= m;
     }
@@ -316,14 +409,15 @@
     return formCache.form;
   }
 
-  /* the guess is frozen during reveal, so caching on item is safe. */
+  /* the guess is frozen during reveal, so caching on item is safe.
+     Both patches use the item's own form — comparing your light on a
+     sphere against a lumpy blob you never saw taught nothing. */
   function ensurePatches(it, c) {
     var key = cacheKey();
     if (patchCache.key === key) return patchCache;
-    var unit = [{ x: 0, y: 0, z: 0, r: 1 }];
     patchCache.key = key;
-    patchCache.you = renderForm(unit, lightVec(guess.az, guess.el), it, 24, shadeStops(c));
-    patchCache.truth = renderForm(unit, lightVec(it.az, it.el), it, 24, shadeStops(c));
+    patchCache.you = renderForm(it.spheres, lightVec(guess.az, guess.el), it, lay.patchR, shadeStops(c));
+    patchCache.truth = renderForm(it.spheres, lightVec(it.az, it.el), it, lay.patchR, shadeStops(c));
     return patchCache;
   }
 
@@ -332,17 +426,18 @@
      ============================================================ */
 
   function ringPos(azDeg, r) {
-    var a = azDeg * Math.PI / 180;
+    var a = azDeg * DEG;
     return { x: lay.cx + r * Math.cos(a), y: lay.cy - r * Math.sin(a) };
   }
 
   function arcPos(elDeg, r) {
-    var phi = (180 - elDeg) * Math.PI / 180;
+    var phi = (180 - elDeg) * DEG;
     return { x: lay.arcC.x + r * Math.cos(phi), y: lay.arcC.y - r * Math.sin(phi) };
   }
 
-  function sunMarker(x, y, r, strokeCol, fillCol) {
+  function sunMarker(x, y, r, strokeCol, fillCol, dashed) {
     var i, a;
+    ctx.save();
     ctx.lineWidth = 2;
     ctx.strokeStyle = strokeCol;
     for (i = 0; i < 8; i++) {
@@ -352,13 +447,16 @@
       ctx.lineTo(x + Math.cos(a) * (r + 7), y + Math.sin(a) * (r + 7));
       ctx.stroke();
     }
+    if (dashed) ctx.setLineDash([4, 3]);
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fillStyle = fillCol;
     ctx.fill();
     ctx.stroke();
+    ctx.restore();
   }
 
+  /* ground plane + the form's real cast shadow on it */
   function drawGround(c, it) {
     var g = lay.cy + lay.formR * 1.32;
     ctx.save();
@@ -370,32 +468,52 @@
     ctx.lineTo(lay.cx + lay.formR * 1.7, g);
     ctx.stroke();
     ctx.setLineDash([]);
-    /* cast-shadow hint: falls away from the light, stretches when the
-       sun is low, fades out when the light comes from below. */
-    var a = it.az * Math.PI / 180;
-    var sx = Math.cos(a), sy = Math.sin(a);
-    var len = 1 - it.el / 90;
-    var vis = 0.35 + sy;
-    if (vis < 0) vis = 0;
-    if (vis > 1) vis = 1;
-    if (vis > 0) {
-      var ex = lay.cx - sx * lay.formR * (0.35 + 1.1 * len);
-      var rx = lay.formR * (0.55 + 0.75 * len);
-      var ry = lay.formR * 0.16;
-      ctx.fillStyle = c.ink;
-      ctx.globalAlpha = 0.10 * vis;
+    ctx.restore();
+
+    var L = lightVec(it.az, it.el);
+    var alt = sunAltitudeDeg(L);
+    /* the lower the sun the longer AND the fainter the shadow — a
+       grazing sun barely lights the floor it stretches across. */
+    var fade = clamp01((alt - 2) / 16);
+    if (fade <= 0) return; /* sun under the floor — nothing to cast */
+
+    var dir = shadowDirGround(L);
+    var h0 = lay.formR * 1.32 / COS_P; /* form centre's height over the floor */
+    ctx.save();
+    ctx.fillStyle = c.ink;
+    var pass;
+    for (pass = 0; pass < 2; pass++) {
+      ctx.globalAlpha = (pass === 0 ? 0.09 : 0.15) * fade;
       ctx.beginPath();
-      ctx.ellipse(ex, g, rx * 1.25, ry * 1.2, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = 0.16 * vis;
-      ctx.beginPath();
-      ctx.ellipse(ex, g, rx, ry, 0, 0, Math.PI * 2);
+      for (var i = 0; i < it.spheres.length; i++) {
+        var s = it.spheres[i];
+        var P = { x: s.x * lay.formR, y: s.y * lay.formR, z: s.z * lay.formR };
+        var sh = sphereShadow(P.x, dot3(P, GZ), dot3(P, UP) + h0,
+          s.r * lay.formR, alt, dir);
+        traceGroundEllipse(sh, dir, g, pass === 0 ? 1.22 : 1);
+      }
       ctx.fill();
     }
     ctx.restore();
   }
 
-  function drawRing(c) {
+  /* walk a ground-plane ellipse onto the sheet: depth foreshortens by
+     sin(pitch), which is what tips it into a real screen ellipse. */
+  function traceGroundEllipse(sh, dir, g, grow) {
+    var pa = -dir.b, pb = dir.a;
+    for (var k = 0; k <= 48; k++) {
+      var t = k / 48 * Math.PI * 2;
+      var ca = Math.cos(t) * sh.major * grow;
+      var sa = Math.sin(t) * sh.minor * grow;
+      var ga = sh.a + ca * dir.a + sa * pa;
+      var gb = sh.b + ca * dir.b + sa * pb;
+      var X = lay.cx + ga, Y = g - gb * SIN_P;
+      if (k === 0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y);
+    }
+    ctx.closePath();
+  }
+
+  function drawRing(c, aim) {
     ctx.save();
     ctx.strokeStyle = c.muted;
     ctx.lineWidth = 1.5;
@@ -411,6 +529,13 @@
       ctx.moveTo(p1.x, p1.y);
       ctx.lineTo(p2.x, p2.y);
       ctx.stroke();
+    }
+    if (aim) {
+      var lp = ringPos(150, lay.ringR - 15);
+      ctx.fillStyle = labelInk(c);
+      ctx.font = '600 10px ' + MONO;
+      ctx.textAlign = 'center';
+      ctx.fillText('direction', lp.x, lp.y);
     }
     ctx.restore();
   }
@@ -442,20 +567,38 @@
     ctx.fillText('frontal', lay.arcC.x - 2, lay.arcC.y - lay.ar - 8);
     ctx.textAlign = 'center';
     ctx.fillText('raking', lay.arcC.x - lay.ar, lay.arcC.y + 14);
+    var tp = arcPos(52, lay.ar - 19);
+    ctx.fillText('tilt', tp.x, tp.y);
     ctx.restore();
   }
 
   /* short-way arc from guess to truth — the visible size of the miss. */
   function deltaArc(cx, cy, r, fromDeg, toDeg, col) {
-    var d = ((toDeg - fromDeg + 540) % 360) - 180;
+    var d = signedDeltaDeg(fromDeg, toDeg);
     if (Math.abs(d) < 0.5) return;
     ctx.save();
     ctx.strokeStyle = col;
     ctx.lineWidth = 3;
     ctx.globalAlpha = 0.7;
     ctx.beginPath();
-    ctx.arc(cx, cy, r, -fromDeg * Math.PI / 180, -(fromDeg + d) * Math.PI / 180, d > 0);
+    ctx.arc(cx, cy, r, -fromDeg * DEG, -(fromDeg + d) * DEG, d > 0);
     ctx.stroke();
+    ctx.restore();
+  }
+
+  /* the two misses, named, so a huge ring arc next to a small score
+     reads as "steep light" instead of as a broken scale. */
+  function deltaLabel(c, cx, cy, r, fromDeg, toDeg, txt) {
+    var d = signedDeltaDeg(fromDeg, toDeg);
+    if (Math.abs(d) < 1) return;
+    var mid = (fromDeg + d / 2) * DEG;
+    ctx.save();
+    ctx.fillStyle = labelInk(c);
+    ctx.font = '600 10px ' + MONO;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(txt + ' ' + Math.round(Math.abs(d)) + '°',
+      cx + r * Math.cos(mid), cy - r * Math.sin(mid));
     ctx.restore();
   }
 
@@ -468,38 +611,47 @@
       var da = accentInk(c); /* raw mint sits under 3:1 on paper */
       deltaArc(lay.cx, lay.cy, lay.ringR, guess.az, it.az, da);
       deltaArc(lay.arcC.x, lay.arcC.y, lay.ar, 180 - guess.el, 180 - it.el, da);
+      deltaLabel(c, lay.cx, lay.cy, lay.ringR - 18, guess.az, it.az, 'dir');
+      deltaLabel(c, lay.arcC.x, lay.arcC.y, lay.ar - 20, 180 - guess.el, 180 - it.el, 'tilt');
       sunMarker(g.x, g.y, 10, c.muted, 'transparent');
       sunMarker(ge.x, ge.y, 8, c.muted, 'transparent');
-      sunMarker(tr.x, tr.y, 13, c.ink, c.accent);
-      sunMarker(te.x, te.y, 10, c.ink, c.accent);
+      /* the true sun is filled, and the fill is the answer — so it gets
+         the same inked mint the delta arcs do (raw mint fills at 2.9:1
+         on paper, under the 3:1 bar for a meaning-bearing shape). */
+      sunMarker(tr.x, tr.y, 13, c.ink, da);
+      sunMarker(te.x, te.y, 10, c.ink, da);
     } else {
-      sunMarker(g.x, g.y, 13, c.ink, c.card);
-      sunMarker(ge.x, ge.y, 10, c.ink, c.card);
-      /* live degree readouts in the margins */
+      sunMarker(g.x, g.y, 13, c.ink, c.card, !touched);
+      sunMarker(ge.x, ge.y, 10, c.ink, c.card, !touched);
+      /* live degree readouts in the margins — until then, an invitation */
+      ctx.save();
       ctx.fillStyle = labelInk(c);
       ctx.font = '600 11px ' + MONO;
       ctx.textAlign = 'center';
       var tp = ringPos(guess.az, lay.ringR + 24);
-      ctx.fillText(Math.round(guess.az) + '°', Math.max(16, Math.min(W - 16, tp.x)), Math.max(12, Math.min(H - 4, tp.y + 4)));
+      ctx.fillText(touched ? Math.round(guess.az) + '°' : 'drag me',
+        Math.max(30, Math.min(W - 30, tp.x)), Math.max(12, Math.min(H - 4, tp.y + 4)));
       var ep = arcPos(guess.el, lay.ar + 22);
-      ctx.fillText(Math.round(guess.el) + '°', Math.max(16, Math.min(W - 16, ep.x)), Math.max(12, Math.min(H - 4, ep.y + 4)));
+      ctx.fillText(touched ? Math.round(guess.el) + '°' : 'drag me',
+        Math.max(30, Math.min(W - 30, ep.x)), Math.max(12, Math.min(H - 4, ep.y + 4)));
+      ctx.restore();
     }
   }
 
   function drawReveal(c, it) {
     var patches = ensurePatches(it, c);
-    var pr = 24, py = H - 52;
-    var xs = [34, 112];
+    var py = lay.patchY;
     var labels = ['you', 'true'];
     var imgs = [patches.you, patches.truth];
     ctx.save();
     for (var i = 0; i < 2; i++) {
       var b = imgs[i].box;
-      ctx.drawImage(imgs[i].canvas, xs[i] - b / 2, py - b / 2, b, b);
+      var x = lay.patchX[i];
+      ctx.drawImage(imgs[i].canvas, x - b / 2, py - b / 2, b, b);
       ctx.fillStyle = labelInk(c);
       ctx.font = '600 10px ' + MONO;
       ctx.textAlign = 'center';
-      ctx.fillText(labels[i], xs[i], py + pr + 16);
+      ctx.fillText(labels[i], x, py + b / 2 + 12);
     }
     ctx.fillStyle = accentInk(c);
     ctx.font = '700 24px ' + HAND;
@@ -517,27 +669,40 @@
     drawGround(c, it);
     var f = ensureForm(it, c);
     ctx.drawImage(f.canvas, lay.cx - f.box / 2, lay.cy - f.box / 2, f.box, f.box);
-    drawRing(c);
+    drawRing(c, !reveal);
     drawArc(c);
     if (reveal) drawReveal(c, it);
     drawMarkers(c, it, reveal);
   }
 
   /* ============================================================
-     round flow
+     round flow — ArtDaily.report fires exactly once, in finishRound
      ============================================================ */
 
   function setBtn(label, sym) {
-    btnRound.textContent = '';
-    btnRound.appendChild(document.createTextNode(label + ' '));
+    btnDone.textContent = '';
+    btnDone.appendChild(document.createTextNode(label + ' '));
     var s = document.createElement('span');
     s.setAttribute('aria-hidden', 'true');
     s.textContent = sym;
+    btnDone.appendChild(s);
+  }
+
+  function clearConfirm() {
+    clearTimeout(confirmTimer);
+    if (!confirmNew) return;
+    confirmNew = false;
+    btnRound.textContent = '';
+    btnRound.appendChild(document.createTextNode('new round '));
+    var s = document.createElement('span');
+    s.setAttribute('aria-hidden', 'true');
+    s.textContent = '↻';
     btnRound.appendChild(s);
   }
 
   function newRound() {
     clearTimeout(revealTimer);
+    clearConfirm();
     round += 1;
     idx = 0;
     scores = [];
@@ -545,36 +710,64 @@
     for (var i = 0; i < ITEMS_PER_ROUND; i++) items.push(makeItem(i));
     hudRound.textContent = String(round);
     hudScore.textContent = '–';
+    btnDone.disabled = false;
     startItem();
+  }
+
+  /* mid-round the new-round button throws away work, so it asks first */
+  function requestNewRound() {
+    var midRound = (phase === 'aim' || phase === 'reveal') &&
+      (idx > 0 || scores.length > 0 || touched);
+    if (!midRound || confirmNew) { newRound(); return; }
+    confirmNew = true;
+    btnRound.textContent = 'discard round?';
+    hint.textContent = 'that scraps this round — press again to start over, or carry on.';
+    clearTimeout(confirmTimer);
+    confirmTimer = setTimeout(function () {
+      clearConfirm();
+      if (phase === 'aim') setAimHint();
+    }, 4500);
+  }
+
+  function setAimHint() {
+    hint.textContent = 'form ' + (idx + 1) + ' of ' + ITEMS_PER_ROUND +
+      ' — read the shading: where is the light? drag the ring (direction) and the corner arc (tilt), then lock it in' +
+      (idx === 0 ? ' — or double-tap the form.' : '.');
   }
 
   function startItem() {
     phase = 'aim';
     guess = { az: 90, el: 40 };
+    touched = false;
     formCache.key = null;
     patchCache.key = null;
     setBtn('lock it in', '☀');
-    hint.textContent = 'form ' + (idx + 1) + ' of ' + ITEMS_PER_ROUND +
-      ' — where is the light? drag the ring and the arc, then lock it in.';
+    setAimHint();
     draw();
   }
 
-  function quip(err) {
-    if (err <= GRACE_DEG) return 'dead on.';
-    if (err <= 10) return 'sharp eye.';
-    if (err <= 20) return 'close — check the highlight.';
-    if (err <= 32) return 'warm — trace highlight to terminator.';
-    return 'flipped? the terminator tells you.';
+  function quip(err, azErr) {
+    var q;
+    if (err <= GRACE_DEG) q = 'dead on.';
+    else if (err <= 10) q = 'sharp eye.';
+    else if (err <= 20) q = 'close — check the highlight.';
+    else if (err <= 32) q = 'warm — trace highlight to terminator.';
+    else q = 'flipped? the terminator tells you.';
+    if (azErr > 25 && err < 16) q += ' steep light — direction counts for less up here.';
+    return q;
   }
 
   function lockIn() {
     if (phase !== 'aim') return;
+    clearConfirm();
     var it = items[idx];
     lastErr = angleBetweenDeg(lightVec(guess.az, guess.el), lightVec(it.az, it.el));
+    lastAzErr = Math.abs(signedDeltaDeg(guess.az, it.az));
     scores.push(itemScore(lastErr));
     phase = 'reveal';
+    revealAt = Date.now();
     setBtn(idx === ITEMS_PER_ROUND - 1 ? 'finish' : 'next', '→');
-    hint.textContent = 'off by ' + Math.round(lastErr) + '° — ' + quip(lastErr);
+    hint.textContent = 'off by ' + Math.round(lastErr) + '° — ' + quip(lastErr, lastAzErr);
     clearTimeout(revealTimer);
     revealTimer = setTimeout(advance, REVEAL_MS);
     draw();
@@ -590,10 +783,12 @@
 
   function finishRound() {
     phase = 'done';
+    clearConfirm();
     var res = ArtDaily.report(roundScore(scores));
     hudScore.textContent = String(res.score);
     hudBest.textContent = res.best === null ? '–' : String(res.best);
-    setBtn('new round', '↻');
+    setBtn('finished', '✓');
+    btnDone.disabled = true;
     hint.textContent = 'round done — press “new round” to go again.';
     showToast((res.isNewBest ? 'new best! ' : 'score ') + res.score + ' / 100', res.isNewBest);
     draw();
@@ -613,7 +808,9 @@
 
   /* ============================================================
      input — drag the ring (azimuth) or the arc (elevation);
-     both bands are ≥ 68px wide. Tap anywhere during reveal to skip.
+     both bands are ≥ 68px wide. Double-tap the form to lock without
+     leaving the canvas. Tap during reveal to skip — but not in the
+     first moment, so a stray second tap can't eat the answer.
      ============================================================ */
 
   function pointerPos(ev) {
@@ -622,8 +819,9 @@
   }
 
   function applyAz(p) {
-    var a = Math.atan2(lay.cy - p.y, p.x - lay.cx) * 180 / Math.PI;
+    var a = Math.atan2(lay.cy - p.y, p.x - lay.cx) / DEG;
     guess.az = ((a % 360) + 360) % 360;
+    touched = true;
     draw();
   }
 
@@ -632,41 +830,64 @@
        [90°,180°] and the marker never jumps. */
     var px = Math.min(p.x, lay.arcC.x - 0.001);
     var py = Math.min(p.y, lay.arcC.y - 0.001);
-    var phi = Math.atan2(lay.arcC.y - py, px - lay.arcC.x) * 180 / Math.PI;
+    var phi = Math.atan2(lay.arcC.y - py, px - lay.arcC.x) / DEG;
     if (phi < 90) phi = 90;
     if (phi > 180) phi = 180;
     guess.el = 180 - phi;
+    touched = true;
     draw();
   }
 
-  var drag = null;
+  var drag = null, dragId = null, lastFormTap = 0;
+
   canvas.addEventListener('pointerdown', function (ev) {
     ev.preventDefault();
-    if (phase === 'reveal') { advance(); return; }
+    if (phase === 'reveal') {
+      if (Date.now() - revealAt >= SKIP_LOCK_MS) advance();
+      return;
+    }
     if (phase !== 'aim') return;
+    /* one pointer owns the aim: a second finger (or a palm) must not
+       snatch the sun mid-drag. */
+    if (dragId !== null) return;
     var p = pointerPos(ev);
     var dRing = Math.abs(Math.hypot(p.x - lay.cx, p.y - lay.cy) - lay.ringR);
     var dArc = Math.hypot(p.x - lay.arcC.x, p.y - lay.arcC.y);
+    var dForm = Math.hypot(p.x - lay.cx, p.y - lay.cy);
     if (dRing <= 34) {
       drag = 'az';
       applyAz(p);
     } else if (dArc >= lay.ar - 44 && dArc <= lay.ar + 44 && p.x <= lay.arcC.x + 24 && p.y <= lay.arcC.y + 24) {
       drag = 'el';
       applyEl(p);
+    } else if (dForm <= lay.formR + 8) {
+      /* the form itself: a lock gesture on touch, and never a silent tap */
+      var now = Date.now();
+      if (now - lastFormTap < DBLTAP_MS) { lastFormTap = 0; lockIn(); return; }
+      lastFormTap = now;
+      hint.textContent = 'double-tap the form to lock it in — or drag the ring (direction) and the corner arc (tilt).';
+      return;
     } else {
+      hint.textContent = 'drag the dashed ring for direction, the corner arc for tilt — then lock it in.';
       return;
     }
+    dragId = ev.pointerId;
+    clearConfirm();
     try { canvas.setPointerCapture(ev.pointerId); } catch (e) {}
   });
 
   canvas.addEventListener('pointermove', function (ev) {
-    if (!drag || phase !== 'aim') return;
+    if (!drag || phase !== 'aim' || ev.pointerId !== dragId) return;
     ev.preventDefault();
     var p = pointerPos(ev);
     if (drag === 'az') applyAz(p); else applyEl(p);
   });
 
-  function endDrag() { drag = null; }
+  function endDrag(ev) {
+    if (ev && dragId !== null && ev.pointerId !== dragId) return;
+    drag = null;
+    dragId = null;
+  }
   canvas.addEventListener('pointerup', endDrag);
   canvas.addEventListener('pointercancel', endDrag);
 
@@ -689,15 +910,17 @@
     else if (k === 'ArrowDown') { guess.el = Math.max(0, guess.el - estep); }
     else return;
     ev.preventDefault();
+    touched = true;
+    clearConfirm();
     draw();
   });
 
   /* ---- chrome wiring ---- */
-  btnRound.addEventListener('click', function () {
+  btnDone.addEventListener('click', function () {
     if (phase === 'aim') lockIn();
     else if (phase === 'reveal') advance();
-    else newRound();
   });
+  btnRound.addEventListener('click', requestNewRound);
 
   var btnHow = document.getElementById('btnHow');
   var howTo = document.getElementById('howTo');

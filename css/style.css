@@ -390,3 +390,12 @@ a { color: inherit; }
 /* light-direction: you drag suns around, you don't draw —
    a pointer cursor reads better than the crosshair. */
 .game-canvas { cursor: pointer; }
+
+/* Six locks a round, most of them on a phone: every control here is
+   a full thumb target (44px) instead of a 35px sticker. */
+.game-controls .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  min-height: 44px;
+}

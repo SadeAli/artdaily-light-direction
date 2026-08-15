@@ -54,13 +54,15 @@
       </div>
 
       <div class="game-controls">
-        <button class="btn btn-primary" id="btnRound">new round <span aria-hidden="true">↻</span></button>
+        <button class="btn btn-primary" id="btnDone">lock it in <span aria-hidden="true">☀</span></button>
+        <button class="btn" id="btnRound">new round <span aria-hidden="true">↻</span></button>
         <button class="btn" id="btnHow" aria-expanded="false" aria-controls="howTo">how to play</button>
       </div>
       <div class="howto" id="howTo" hidden>
         <p class="howto-cmd" aria-hidden="true"><span class="prompt">$</span> man light-direction</p>
-        <p>A hidden sun lights the form. Drag the ring to say where the light sits, the arc for how head-on it hits, then lock it in. Six forms per round.</p>
-        <p>Scoring: the 3D angle between your sun and the real one — within 3° is perfect, 45° off scores zero. Arrow keys aim, enter locks.</p>
+        <p>A hidden sun lights the form. Drag the dashed ring for the light's <b>direction</b> around the form, the corner arc for its <b>tilt</b> (raking along the picture plane → frontal, straight out of the page), then lock it in. Six forms per round.</p>
+        <p>Scoring: the 3D angle between your sun and the real one — within 3° is perfect, 45° off scores zero. Arrow keys aim (shift = coarse), enter locks, and on a phone a double-tap on the form locks without reaching for the button.</p>
+        <p>The cast shadow is honest: it is the form projected along the real light vector onto the floor, so a long shadow means a low sun and a tight pool means an overhead one — read it as a second cue.</p>
         <p>Studio tip: find the brightest spot and the terminator — the light sits on the line between them, just past the highlight.</p>
       </div>
 
