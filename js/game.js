@@ -19,10 +19,15 @@
   var SLUG = 'light-direction';
   var ITEMS_PER_ROUND = 6;
   var GRACE_DEG = 3;    /* errors under this still score 100 */
+  /* Rounds 1's first two forms wait for an explicit "next": the reveal
+     IS the lesson (your light next to the true light on the same form,
+     plus the labelled shadow edge) and four seconds is not enough to
+     compare two shaded blobs. */
+  var REVEAL_HOLD_ITEMS = 2;
   var ZERO_SPAN = 42;   /* score hits 0 at grace + this = 45° off */
-  var REVEAL_MS = 4000; /* reveal auto-advances (tap skips) */
-  var SKIP_LOCK_MS = 450; /* …but not for the first moment, so a
-                             stray second tap can't eat the lesson */
+  var REVEAL_MS = 7000; /* later reveals auto-advance (tap skips) */
+  var SKIP_LOCK_MS = 1100; /* …but not for the first second: an idle
+                              click must not eat the whole lesson */
   var DBLTAP_MS = 380;  /* double-tap the form = lock it in */
 
   /* ============================================================
@@ -564,9 +569,11 @@
     ctx.fillStyle = labelInk(c);
     ctx.font = '600 10px ' + MONO;
     ctx.textAlign = 'right';
-    ctx.fillText('frontal', lay.arcC.x - 2, lay.arcC.y - lay.ar - 8);
+    /* "raking" and "frontal" are trade shorthand for two ideas a
+       beginner can picture instantly if you just say them. */
+    ctx.fillText('from behind you', lay.arcC.x - 2, lay.arcC.y - lay.ar - 8);
     ctx.textAlign = 'center';
-    ctx.fillText('raking', lay.arcC.x - lay.ar, lay.arcC.y + 14);
+    ctx.fillText('from the side', lay.arcC.x - lay.ar + 8, lay.arcC.y + 14);
     var tp = arcPos(52, lay.ar - 19);
     ctx.fillText('tilt', tp.x, tp.y);
     ctx.restore();
@@ -658,6 +665,90 @@
     ctx.textAlign = 'center';
     ctx.fillText('off by ' + Math.round(lastErr) + '°', W / 2, 28);
     ctx.restore();
+    drawTerminator(c, it);
+  }
+
+  /* THE TERMINATOR, DRAWN AND NAMED. The drill's coaching lines lean on
+     the word and it was never once shown — the reveal simply did not
+     draw it. It is one arc: on a sphere lit from direction L, the points
+     where the surface turns away (n·L = 0) project to an ellipse, and
+     that ellipse is the whole reason a beginner can read a light source
+     off a shaded ball. Drawn on the true light, on the big form. */
+  function drawTerminator(c, it) {
+    /* Exact only for a lone sphere centred on the form; a lumpy blob's
+       shadow edge is not one arc, so it is simply not claimed there. */
+    var sp = it.spheres;
+    if (!sp || sp.length !== 1 || sp[0].x || sp[0].y || sp[0].z) return;
+    var L = lightVec(it.az, it.el);
+    var R = lay.formR * (sp[0].r || 1);
+    /* Build an orthonormal basis (u, v) spanning the plane normal to L;
+       the terminator is the circle of unit normals lying in that plane. */
+    var up = Math.abs(L.z) < 0.9 ? { x: 0, y: 0, z: 1 } : { x: 1, y: 0, z: 0 };
+    var ux = L.y * up.z - L.z * up.y;
+    var uy = L.z * up.x - L.x * up.z;
+    var uz = L.x * up.y - L.y * up.x;
+    var un = Math.sqrt(ux * ux + uy * uy + uz * uz) || 1;
+    ux /= un; uy /= un; uz /= un;
+    var vx = L.y * uz - L.z * uy;
+    var vy = L.z * ux - L.x * uz;
+    var vz = L.x * uy - L.y * ux;
+    ctx.save();
+    ctx.strokeStyle = accentInk(c);
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    var started = false, t, nx, ny, nz, px, py;
+    for (t = 0; t <= Math.PI * 2 + 0.001; t += Math.PI / 60) {
+      nx = ux * Math.cos(t) + vx * Math.sin(t);
+      ny = uy * Math.cos(t) + vy * Math.sin(t);
+      nz = uz * Math.cos(t) + vz * Math.sin(t);
+      if (nz < 0) { started = false; continue; } /* the far half is hidden */
+      px = lay.cx + nx * R;
+      py = lay.cy - ny * R;
+      if (!started) { ctx.moveTo(px, py); started = true; } else { ctx.lineTo(px, py); }
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+    /* name it once, on the arc itself */
+    nx = ux; ny = uy; nz = uz;
+    if (nz < 0) { nx = -ux; ny = -uy; }
+    ctx.fillStyle = labelInk(c);
+    ctx.font = '600 10px ' + MONO;
+    ctx.textAlign = 'center';
+    ctx.fillText('shadow edge (the “terminator”)',
+      Math.max(90, Math.min(W - 90, lay.cx + nx * (R + 16))),
+      Math.max(12, Math.min(H - 6, lay.cy - ny * (R + 16))));
+    ctx.restore();
+  }
+
+  /* LIVE PREVIEW. The same form, re-shaded by the light you are aiming
+     right now, drawn small beside the big one. Until this existed the
+     entire item was a blind guess: nothing on screen showed what your
+     answer looked like until after it had been scored. It turns "guess
+     the number" into "match the picture", which is how a beginner
+     actually learns to read light — and it costs nothing on any input
+     device. Cached in 2° buckets so a drag does not re-shade per pixel. */
+  var livePatch = { key: '', img: null };
+  function ensureLivePatch(it, c) {
+    var key = [round, idx, W, ArtDaily.theme(),
+      Math.round(guess.az / 2), Math.round(guess.el / 2)].join(':');
+    if (livePatch.key === key && livePatch.img) return livePatch.img;
+    livePatch.key = key;
+    livePatch.img = renderForm(it.spheres, lightVec(guess.az, guess.el), it, lay.patchR, shadeStops(c));
+    return livePatch.img;
+  }
+
+  function drawLivePreview(c, it) {
+    var img = ensureLivePatch(it, c);
+    var b = img.box;
+    var x = lay.patchX[0], y = lay.patchY;
+    ctx.save();
+    ctx.drawImage(img.canvas, x - b / 2, y - b / 2, b, b);
+    ctx.fillStyle = labelInk(c);
+    ctx.font = '600 10px ' + MONO;
+    ctx.textAlign = 'center';
+    ctx.fillText('your light so far', x, y + b / 2 + 12);
+    ctx.restore();
   }
 
   function draw() {
@@ -672,6 +763,7 @@
     drawRing(c, !reveal);
     drawArc(c);
     if (reveal) drawReveal(c, it);
+    else if (touched) drawLivePreview(c, it);
     drawMarkers(c, it, reveal);
   }
 
@@ -731,8 +823,11 @@
 
   function setAimHint() {
     hint.textContent = 'form ' + (idx + 1) + ' of ' + ITEMS_PER_ROUND +
-      ' — read the shading: where is the light? drag the ring (direction) and the corner arc (tilt), then lock it in' +
-      (idx === 0 ? ' — or double-tap the form.' : '.');
+      ' — read the shading: where is the light? drag the sun round the ring for its direction,' +
+      ' and along the corner arc for how far it is tilted toward you' +
+      (idx === 0
+        ? ' (side-on at the bottom, straight out of the screen at the top). your light is previewed beside the form as you aim. double-tap the form to lock it in.'
+        : '.');
   }
 
   function startItem() {
@@ -746,13 +841,18 @@
     draw();
   }
 
+  /* Coaching a struggling beginner reads in the ONE word only a trained
+     artist knows — "terminator" — is a wall exactly where the drill can
+     least afford one. The reveal now draws and labels that line, so the
+     word is earned; until the player has seen it (form 1) the coaching
+     says the same thing the long way round. */
   function quip(err, azErr) {
     var q;
     if (err <= GRACE_DEG) q = 'dead on.';
     else if (err <= 10) q = 'sharp eye.';
-    else if (err <= 20) q = 'close — check the highlight.';
-    else if (err <= 32) q = 'warm — trace highlight to terminator.';
-    else q = 'flipped? the terminator tells you.';
+    else if (err <= 20) q = 'close — check where the highlight sits.';
+    else if (err <= 32) q = 'warm — draw a line from the bright spot to the shadow edge; the light comes from along it.';
+    else q = 'flipped? the shadow edge — the line where light stops, marked on the reveal — points straight back at the light.';
     if (azErr > 25 && err < 16) q += ' steep light — direction counts for less up here.';
     return q;
   }
@@ -767,9 +867,18 @@
     phase = 'reveal';
     revealAt = Date.now();
     setBtn(idx === ITEMS_PER_ROUND - 1 ? 'finish' : 'next', '→');
-    hint.textContent = 'off by ' + Math.round(lastErr) + '° — ' + quip(lastErr, lastAzErr);
+    hint.textContent = 'off by ' + Math.round(lastErr) + '° — ' + quip(lastErr, lastAzErr) +
+      (round === 1 && idx < REVEAL_HOLD_ITEMS
+        ? ' compare the two small forms — yours and the true one — then press “next”.'
+        : '');
     clearTimeout(revealTimer);
-    revealTimer = setTimeout(advance, REVEAL_MS);
+    /* Round 1's first forms wait for the player; after that the reveal
+       still auto-advances, but at 7s rather than 4 — long enough to put
+       your light and the true light side by side and actually compare
+       them, which is the entire lesson. */
+    if (!(round === 1 && idx < REVEAL_HOLD_ITEMS)) {
+      revealTimer = setTimeout(advance, REVEAL_MS);
+    }
     draw();
   }
 
@@ -838,10 +947,14 @@
     draw();
   }
 
-  var drag = null, dragId = null, lastFormTap = 0;
+  var drag = null, dragId = null, lastFormTap = 0, lastPenAt = 0;
 
   canvas.addEventListener('pointerdown', function (ev) {
     ev.preventDefault();
+    /* Palm rejection: on a tablet the palm lands milliseconds before the
+       nib, and first-pointer-wins would hand it the whole gesture. */
+    if (ev.pointerType === 'pen') lastPenAt = Date.now();
+    else if (ev.pointerType === 'touch' && Date.now() - lastPenAt < 500) return;
     if (phase === 'reveal') {
       if (Date.now() - revealAt >= SKIP_LOCK_MS) advance();
       return;
@@ -865,10 +978,10 @@
       var now = Date.now();
       if (now - lastFormTap < DBLTAP_MS) { lastFormTap = 0; lockIn(); return; }
       lastFormTap = now;
-      hint.textContent = 'double-tap the form to lock it in — or drag the ring (direction) and the corner arc (tilt).';
+      hint.textContent = 'double-tap the form to lock it in — or drag the sun round the ring for direction, along the corner arc for tilt.';
       return;
     } else {
-      hint.textContent = 'drag the dashed ring for direction, the corner arc for tilt — then lock it in.';
+      hint.textContent = 'drag the sun round the dashed ring for direction, along the corner arc for tilt — then lock it in.';
       return;
     }
     dragId = ev.pointerId;

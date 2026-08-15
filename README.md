@@ -25,3 +25,26 @@ form locks on touch. "new round" mid-round asks before it scraps your work.
 Run it: `python3 -m http.server 8080` in this folder — zero build, zero deps.
 
 Part of [Art Daily](https://artdaily.sadeali.com/) · more at [sadeali.com](https://sadeali.com/)
+
+## What changed in the input-fairness pass
+
+The shadow edge — the "terminator" the coaching lines lean on — is drawn
+and labelled on the reveal, so the word is earned rather than assumed.
+A live preview of the form under YOUR current light sits beside it while
+you aim, which turns a blind guess into a visual match. The reveal waits
+for an explicit "next" on the first two forms of a first round and holds
+7s after that (it was a flat 4s), and the arc's "raking"/"frontal" labels
+now read "from the side" / "from behind you".
+
+## Input fairness
+
+Scores are only ever compared against your own history, so the drill
+eases its tolerances for the hardware in your hand and says which one it
+eased for (the "scoring for…" chip in the HUD). A pen keeps the strict
+reference; a mouse or trackpad, which pivots at the wrist and cannot
+creep, gets roughly double the room; a finger sits between. Start and
+grab zones move the other way — a screenless tablet needs the *biggest*
+targets, because the hand is out of sight. Relative tolerances carry an
+absolute pixel floor so a phone is never held to a stricter standard
+than a desktop for the same drill.
+
