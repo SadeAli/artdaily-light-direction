@@ -806,6 +806,14 @@
      round flow — ArtDaily.report fires exactly once, in finishRound
      ============================================================ */
 
+  /* Moving focus off a control that is about to be disabled. Called only
+     when the player is actually standing on it, so a mouse round never
+     yanks focus anywhere. */
+  function handFocus(from, to) {
+    if (!from || !to || document.activeElement !== from) return;
+    try { to.focus({ preventScroll: true }); } catch (e) { try { to.focus(); } catch (e2) {} }
+  }
+
   function setBtn(label, sym) {
     btnDone.textContent = '';
     btnDone.appendChild(document.createTextNode(label + ' '));
@@ -958,8 +966,19 @@
     hudScore.textContent = String(res.score);
     hudBest.textContent = res.best === null ? '–' : String(res.best);
     setBtn('finished', '✓');
+    /* Disabling the control that was just pressed drops keyboard focus onto
+       <body>: the next Tab restarts at the back link and walks the whole
+       topbar before it reaches anything playable. "lock it in" becomes
+       "next →" and then "finished ✓" in place, so a keyboard player is
+       standing on this button every single round when it dies. Hand focus
+       to the only move left, the same way the sibling drills do. */
+    handFocus(btnDone, btnRound);
     btnDone.disabled = true;
-    hint.textContent = 'round done — press “new round” to go again.';
+    /* The hint is the drill's only spoken channel: the toast is a sticker
+       (aria-hidden, like the template's), not a second voice, so the round
+       score is said here or a screen-reader player never hears it. */
+    hint.textContent = (res.isNewBest ? 'new best! ' : 'round done — ') + res.score +
+      '/100. press “new round” to go again.';
     showToast((res.isNewBest ? 'new best! ' : 'score ') + res.score + ' / 100', res.isNewBest);
     draw();
   }
