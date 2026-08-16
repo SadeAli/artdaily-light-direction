@@ -823,6 +823,16 @@
     btnDone.appendChild(s);
   }
 
+  /* THE WARNING NEVER GAVE THE LINE BACK. Arming "discard round?" spoke
+     into the hint — which is right — but the hint is also where the reveal
+     lesson and the aim prompt live, and only ONE of the ways out restored
+     anything: the lapse timer, and only while phase was 'aim'. Arm during
+     a reveal, or start a drag while armed, and the drill's one spoken
+     channel sat on "that scraps this round" for the rest of the item —
+     the "off by 14° — check where the highlight sits" it overwrote was
+     simply gone. Save the line, put it back on every exit, and only if
+     nothing newer has claimed it since. */
+  var confirmSaid = '', hintBeforeConfirm = '';
   function clearConfirm() {
     clearTimeout(confirmTimer);
     if (!confirmNew) return;
@@ -833,6 +843,8 @@
     s.setAttribute('aria-hidden', 'true');
     s.textContent = '↻';
     btnRound.appendChild(s);
+    if (confirmSaid && hint.textContent === confirmSaid) hint.textContent = hintBeforeConfirm;
+    confirmSaid = '';
   }
 
   function newRound() {
@@ -856,12 +868,11 @@
     if (!midRound || confirmNew) { newRound(); return; }
     confirmNew = true;
     btnRound.textContent = 'discard round?';
-    hint.textContent = 'that scraps this round — press again to start over, or carry on.';
+    hintBeforeConfirm = hint.textContent;
+    confirmSaid = 'that scraps this round — press “new round” again to start over, or carry on.';
+    hint.textContent = confirmSaid;
     clearTimeout(confirmTimer);
-    confirmTimer = setTimeout(function () {
-      clearConfirm();
-      if (phase === 'aim') setAimHint();
-    }, 4500);
+    confirmTimer = setTimeout(clearConfirm, 4500);
   }
 
   /* The hint is a live region now, and these two lines are written on
