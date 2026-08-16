@@ -1108,6 +1108,19 @@
   }
   canvas.addEventListener('pointerup', endDrag);
   canvas.addEventListener('pointercancel', endDrag);
+  /* A RELEASE THE CANVAS NEVER SEES KILLS THE AIM FOR THE WHOLE ROUND.
+     pointerdown refuses to start a drag while dragId is set (so a palm or
+     a second finger cannot snatch the sun), which means one lost pointerup
+     leaves the ring and the arc permanently inert — the sun stops
+     following the finger and nothing on screen says why. setPointerCapture
+     normally guarantees the release comes back here, but it is wrapped in
+     a try/catch precisely because it can throw or be missing (older
+     WebViews), and then a finger lifted outside the canvas is simply gone.
+     Caught at the window too — bubble phase, so the canvas's own handler
+     still runs first and the pointerId guard makes the second call a
+     no-op. Same belt-and-braces the SDK uses for its gesture counter. */
+  window.addEventListener('pointerup', endDrag);
+  window.addEventListener('pointercancel', endDrag);
 
   /* keyboard: arrows aim (shift = coarse), enter/space locks. */
   canvas.addEventListener('keydown', function (ev) {
