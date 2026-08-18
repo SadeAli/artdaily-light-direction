@@ -3,95 +3,21 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Light Direction — Art Daily</title>
-<meta name="description" content="read the form, place the light — a daily art drill from artdaily.sadeali.com">
-<meta property="og:type" content="website">
-<meta property="og:title" content="Light Direction">
-<meta property="og:description" content="read the form, place the light — a daily art drill">
-<meta property="og:site_name" content="Art Daily · SadeAli">
-<meta property="og:url" content="https://sadeali.github.io/artdaily-light-direction/">
-<link rel="canonical" href="https://sadeali.github.io/artdaily-light-direction/">
-<meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="Light Direction">
-<meta name="twitter:description" content="read the form, place the light — a daily art drill">
-<link rel="icon" href="data:image/svg+xml,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'&gt;&lt;text y='.9em' font-size='90'&gt;🔦&lt;/text&gt;&lt;/svg&gt;">
-<link rel="stylesheet" href="css/style.css">
+<title>Moved — Art Daily</title>
+<link rel="canonical" href="https://artdaily.sadeali.com/light-direction/">
+<meta http-equiv="refresh" content="0; url=https://artdaily.sadeali.com/light-direction/">
 <script>
-(function(){var q=null,t=null;try{q=new URLSearchParams(location.search).get('theme');}catch(e){}try{t=localStorage.getItem('sadeali-theme');}catch(e){}var v=(q==='light'||q==='dark')?q:t;document.documentElement.dataset.theme=(v==='dark')?'dark':'light';})();
+/* Carry ?embed=/?theme= and any #log= hash across, so an old bookmark or a
+   link someone shared lands on the same drill in the same state. */
+location.replace('https://artdaily.sadeali.com/light-direction/' + location.search + location.hash);
 </script>
+<style>
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center;
+         font: 16px/1.6 ui-sans-serif, system-ui, sans-serif;
+         text-align: center; padding: 24px; }
+</style>
 </head>
 <body>
-<div class="topbar">
-  <a class="backlink" href="https://artdaily.sadeali.com/">← artdaily</a>
-  <div class="topbar-spacer"></div>
-  <button class="iconbtn" id="themeToggle" aria-label="Toggle light or dark theme" title="Toggle theme" hidden>
-    <svg class="ic-moon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/></svg>
-    <svg class="ic-sun" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="2" fill="none"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-  </button>
-</div>
-
-<main class="stage game-wide">
-  <div class="term">
-    <div class="term-bar" aria-hidden="true"><i class="dot d1"></i><i class="dot d2"></i><i class="dot d3"></i><span class="term-title">~/artdaily/light-direction</span></div>
-    <div class="term-body game-body">
-      <div class="game-hud">
-        <div class="game-id">
-          <h1 class="game-name"><span class="game-emoji" aria-hidden="true">🔦</span> Light Direction</h1>
-          <p class="game-tagline">read the form, place the light</p>
-        </div>
-        <dl class="hud-stats">
-          <div class="hud-stat"><dt>round</dt><dd id="hudRound">–</dd></div>
-          <div class="hud-stat"><dt>score</dt><dd id="hudScore">–</dd></div>
-          <div class="hud-stat"><dt>best</dt><dd id="hudBest">–</dd></div>
-                <div class="hud-stat hud-input"><dd id="inputMode" hidden></dd></div>
-        </dl>
-      </div>
-
-      <!-- The teaching line: it carries the prompt AND the per-attempt
-           reveal in words, so it is a live region — otherwise a screen
-           reader hears the prompt once and never hears a single result. -->
-      <p class="hint" id="hint" aria-live="polite">Loading…</p>
-
-      <div class="game-stage">
-        <canvas class="game-canvas" id="gameCanvas" tabindex="0" role="img" aria-label="Light Direction drill area"></canvas>
-        <div class="toast" id="toast" aria-hidden="true" hidden></div>
-      </div>
-
-      <div class="game-controls">
-        <button class="btn btn-primary" id="btnDone">lock it in <span aria-hidden="true">☀</span></button>
-        <button class="btn" id="btnRound">new round <span aria-hidden="true">↻</span></button>
-        <button class="btn" id="btnHow" aria-expanded="false" aria-controls="howTo">how to play</button>
-      </div>
-      <div class="howto" id="howTo" hidden>
-        <p class="howto-cmd" aria-hidden="true"><span class="prompt">$</span> man light-direction</p>
-        <p>A hidden sun lights the form. Drag the dashed ring to say which <b>direction</b> the light comes from, and the corner arc to say how far it is <b>tilted toward you</b> — bottom of the arc means the light rakes across from the side, top means it shines straight out of the screen at you. A small preview of the form under <em>your</em> light appears beside it as you aim, so you can match the picture instead of guessing a number. Then lock it in. Six forms per round.</p>
-        <p>Scoring: the 3D angle between your sun and the real one — within 3° is perfect, 45° off scores zero. Arrow keys aim (shift = coarse), enter locks, and on a phone a double-tap on the form locks without reaching for the button.</p>
-        <p>The cast shadow is honest: it is the form projected along the real light vector onto the floor, so a long shadow means a low sun and a tight pool means an overhead one — read it as a second cue.</p>
-        <p>Studio tip: find the brightest spot, then find the <b>shadow edge</b> — the line where the light stops and the dark side begins. Painters call that line the <em>terminator</em>, and the reveal draws it for you on the round forms. The light sits on the line running from the shadow edge through the brightest spot and onward.</p>
-      </div>
-
-      <noscript><p class="hint">This drill needs JavaScript — nothing else, no trackers, no accounts.</p></noscript>
-    </div>
-  </div>
-</main>
-
-<footer class="footer">
-  <nav class="footnav" aria-label="Site links">
-    <a href="https://artdaily.sadeali.com/">More drills</a>
-    <span aria-hidden="true">·</span>
-    <a href="https://sadeali.com/">More experiments</a>
-    <span aria-hidden="true">·</span>
-    <a href="https://sadeali.com/support/">Support <span class="heart-ink" aria-hidden="true">♥</span></a>
-    <span aria-hidden="true">·</span>
-    <a href="https://github.com/SadeAli" rel="me noopener">GitHub</a>
-    <span id="supportLinks"></span>
-  </nav>
-  <p class="fineprint"><span aria-hidden="true"># </span>© SadeAli · free · no ads · no tracking</p>
-</footer>
-
-<script src="js/artdaily-sdk.js"></script>
-<script src="js/support-config.js"></script>
-<script src="js/main.js"></script>
-<script src="js/game.js"></script>
+<p>This drill has moved to <a href="https://artdaily.sadeali.com/light-direction/">artdaily.sadeali.com/light-direction/</a>.</p>
 </body>
 </html>
